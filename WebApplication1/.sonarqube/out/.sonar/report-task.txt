@@ -1,0 +1,7 @@
+projectKey=25.1_DotNetFramework:master
+serverUrl=http://sonar.cybage.com
+serverVersion=25.1.0.102122
+branch=Dev
+dashboardUrl=http://sonar.cybage.com/dashboard?id=25.1_DotNetFramework%3Amaster&branch=Dev
+ceTaskId=40594716-df36-47da-8d0f-32f7bbe44e03
+ceTaskUrl=http://sonar.cybage.com/api/ce/task?id=40594716-df36-47da-8d0f-32f7bbe44e03

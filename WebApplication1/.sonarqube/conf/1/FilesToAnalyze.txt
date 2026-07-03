@@ -1,0 +1,7 @@
+﻿D:\Trainingcontents\Newfolder\WebApplication1.Tests\Properties\AssemblyInfo.cs
+D:\Trainingcontents\Newfolder\WebApplication1.Tests\Controllers\HomeControllerTest.cs
+D:\Trainingcontents\Newfolder\WebApplication1\packages\MSTest.TestAdapter.1.2.0\build\_common\Microsoft.VisualStudio.TestPlatform.MSTest.TestAdapter.dll
+D:\Trainingcontents\Newfolder\WebApplication1\packages\MSTest.TestAdapter.1.2.0\build\_common\Microsoft.VisualStudio.TestPlatform.MSTestAdapter.PlatformServices.Interface.dll
+D:\Trainingcontents\Newfolder\WebApplication1\packages\MSTest.TestAdapter.1.2.0\build\_common\Microsoft.VisualStudio.TestPlatform.MSTestAdapter.PlatformServices.dll
+D:\Trainingcontents\Newfolder\WebApplication1.Tests\App.config
+D:\Trainingcontents\Newfolder\WebApplication1.Tests\packages.config

@@ -1,0 +1,112 @@
+name: Build, Test & SonarCloud Analysis
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+
+    runs-on: windows-latest
+
+    steps:
+
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      with:
+        # Full history so SonarCloud can compute new-code / PR diffs accurately.
+        fetch-depth: 0
+
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Setup NuGet
+      uses: NuGet/setup-nuget@v2
+
+    - name: Setup VSTest
+      uses: darenm/Setup-VSTest@v1.2
+
+    - name: Setup .NET (for global tools)
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 8.0.x
+
+    - name: Cache SonarCloud packages
+      uses: actions/cache@v4
+      with:
+        path: ~\sonar\cache
+        key: ${{ runner.os }}-sonar
+        restore-keys: ${{ runner.os }}-sonar
+
+    - name: Install SonarScanner and coverage tools
+      shell: powershell
+      run: |
+        dotnet tool install --global dotnet-sonarscanner
+        dotnet tool install --global dotnet-coverage
+
+    # Find the solution file automatically
+    - name: Locate Solution File
+      id: solution
+      shell: powershell
+      run: |
+        $sln = Get-ChildItem -Recurse -Filter *.sln | Select-Object -First 1
+
+        if ($null -eq $sln) {
+          Write-Host "No solution file found."
+          exit 1
+        }
+
+        Write-Host "Solution Found:"
+        Write-Host $sln.FullName
+
+        echo "SOLUTION=$($sln.FullName)" >> $env:GITHUB_ENV
+
+    - name: Restore NuGet Packages
+      shell: powershell
+      run: |
+        nuget restore "$env:SOLUTION"
+
+    # SonarScanner must "begin" BEFORE the build so it can hook into MSBuild.
+    - name: SonarScanner Begin
+      shell: powershell
+      run: |
+        dotnet-sonarscanner begin `
+          /o:"almcybage" `
+          /k:"almcybage_kpi-20-test-coverage" `
+          /d:sonar.host.url="https://sonarcloud.io" `
+          /d:sonar.token="6e1bb943a2b4735b188bfc40614dd773446a5af8" `
+          /d:sonar.cs.vscoveragexml.reportsPaths="coverage.xml" `
+          /d:sonar.exclusions="**/Scripts/**,**/Content/**,**/fonts/**,**/*.min.js,**/*.min.css,**/bin/**,**/obj/**" `
+          /d:sonar.coverage.exclusions="**/Scripts/**,**/Content/**,**/fonts/**,**/App_Start/**,**/Global.asax*,**/Views/**,**/*.Tests/**"
+
+    - name: Build Solution
+      shell: powershell
+      run: |
+        msbuild "$env:SOLUTION" `
+          /t:Rebuild `
+          /p:Configuration=Release
+
+    # Run MSTest through dotnet-coverage so we get a VS coverage XML report
+    # that SonarCloud imports via sonar.cs.vscoveragexml.reportsPaths.
+    - name: Run Tests with Coverage
+      shell: powershell
+      run: |
+        $testDll = Get-ChildItem -Recurse -Filter *.Tests.dll |
+          Where-Object { $_.FullName -match "\\bin\\Release\\" } |
+          Select-Object -First 1
+
+        if ($null -eq $testDll) {
+          Write-Host "No test assembly found."
+          exit 1
+        }
+
+        Write-Host "Test assembly: $($testDll.FullName)"
+
+        dotnet-coverage collect "vstest.console.exe `"$($testDll.FullName)`"" -f xml -o coverage.xml
+
+    # SonarScanner "end" uploads build + coverage results to SonarCloud.
+    - name: SonarScanner End
+      shell: powershell
+      run: |
+        dotnet-sonarscanner end /d:sonar.token="6e1bb943a2b4735b188bfc40614dd773446a5af8"

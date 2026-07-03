@@ -1,0 +1,1 @@
+^RPD:\Trainingcontents\Newfolder\WebApplication1.Tests\WebApplication1.Tests.csprojò	CSharp7_3
