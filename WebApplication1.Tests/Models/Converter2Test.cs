@@ -15,3 +15,4 @@ namespace WebApplication1.Tests.Models
             Assert.AreEqual(32, converter.CelsiusToFahrenheit(0));
         }
     }
+}
