@@ -25,7 +25,7 @@ namespace WebApplication1.Models
         /// <summary>
         /// Adds two numbers and stores the outcome as the current result.
         /// </summary>
-        public double Add(double a, double b)
+        public double Add(double a, double b, double c)
         {
             Result = a + b;
             Record("{0} + {1} = {2}", a, b, Result);
@@ -35,7 +35,7 @@ namespace WebApplication1.Models
         /// <summary>
         /// Subtracts <paramref name="b"/> from <paramref name="a"/>.
         /// </summary>
-        public double Subtract(double a, double b)
+        public double Subtract(double a, double b, double c)
         {
             Result = a - b;
             Record("{0} - {1} = {2}", a, b, Result);
