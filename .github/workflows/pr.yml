@@ -114,6 +114,15 @@ jobs:
         dotnet-coverage collect "vstest.console.exe `"$($testDll.FullName)`"" -f xml -o coverage.xml
 
     # SonarScanner "end" uploads results and (because of qualitygate.wait)
+    - name: Read OpenCover Coverage
+      shell: powershell
+      run: |
+        $coverage = Get-ChildItem -Recurse -Filter "OpenCover.xml" | Select-Object -First 1
+
+        Write-Host "Coverage file: $($coverage.FullName)"
+
+        [xml]$xml = Get-Content $coverage.FullName
+        Write-Host "Sequence Coverage: $($xml.CoverageSession.Summary.SequenceCoverage)%"
     # polls the Quality Gate, returning a non-zero exit code if it fails.
     - name: SonarScanner End
       shell: powershell
