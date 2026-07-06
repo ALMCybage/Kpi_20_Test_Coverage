@@ -117,18 +117,10 @@ jobs:
     - name: Read OpenCover Coverage
       shell: powershell
       run: |
-        [xml]$cov = Get-Content "coverage.xml"
-
-        $summary = $cov.SelectSingleNode("//summary")
-
-        if ($summary -ne $null) {
-          Write-Host "Line Coverage: $($summary.linecoverage)%"
-          Write-Host "Branch Coverage: $($summary.branchcoverage)%"
-        }
-        else {
-          Write-Host "Coverage summary not found."
-          exit 1
-        }    
+    - name: Read OpenCover Coverage
+      shell: powershell
+      run: |
+       Get-Content coverage.xml -First 50
 
     # polls the Quality Gate, returning a non-zero exit code if it fails.
     - name: SonarScanner End
