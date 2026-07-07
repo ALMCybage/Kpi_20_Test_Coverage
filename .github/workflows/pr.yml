@@ -157,8 +157,14 @@ jobs:
         # ----------------------------
         # GitHub Headers
         # ----------------------------
+                    Write-Host "Token Length: $($GitHubToken.Length)"
+            
+            if ([string]::IsNullOrWhiteSpace($GitHubToken)) {
+                Write-Host "GitHub token is empty!"
+                exit 1
+            }
           $ghHeaders = @{
-              Authorization = "token $GitHubToken"
+              Authorization = "Bearer $GitHubToken"
               Accept = "application/vnd.github+json"
               "X-GitHub-Api-Version" = "2022-11-28"
               "User-Agent" = "PowerShell"
