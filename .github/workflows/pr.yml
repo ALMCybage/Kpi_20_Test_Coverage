@@ -177,6 +177,22 @@ jobs:
         # ----------------------------
         # Fetch PR Commits
         # ----------------------------
+                      Write-Host ""
+              Write-Host "Testing GitHub Token..."
+               
+              try {
+                  $user = Invoke-RestMethod `
+                      -Uri "https://api.github.com/user" `
+                      -Headers $ghHeaders `
+                      -Method Get
+               
+                  Write-Host "Authenticated as: $($user.login)"
+              }
+              catch {
+                  Write-Host "GitHub authentication failed."
+                  Write-Host $_.Exception.Message
+                  exit 1
+              }
         $commitUrl = "https://api.github.com/repos/$Org/$Repo/pulls/$PrNumber/commits"
 
         Write-Host ""
@@ -189,11 +205,17 @@ jobs:
             -Headers $ghHeaders `
             -Method Get
         }
-        catch {
-          Write-Host "Unable to fetch commits."
-          Write-Host $_.Exception.Message
-          exit 1
-        }
+          catch
+          {
+              Write-Host "Unable to fetch commits."
+           
+              if ($_.Exception.Response) {
+                  Write-Host "HTTP Status: $($_.Exception.Response.StatusCode.value__)"
+              }
+           
+              Write-Host $_.Exception.Message
+              exit 1
+          }
 
         Write-Host ""
         Write-Host "========= PR COMMITS ========="
