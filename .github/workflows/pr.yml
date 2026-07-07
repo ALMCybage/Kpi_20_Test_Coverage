@@ -1,329 +1,114 @@
+# Combined GitHub Actions workflow
+# NOTE: Replace SONAR_HOST_URL only if using self-hosted SonarQube.
 name: PR Validation (Build, Test & SonarCloud Quality Gate)
 
-# Runs on every pull request that targets main.
-# Builds, runs tests with coverage, sends results to SonarCloud, and fails the
-# check if the SonarCloud Quality Gate does not pass (sonar.qualitygate.wait).
 on:
   pull_request:
-    branches:
-      - master
+    branches: [master]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
 
 jobs:
   build:
-
     runs-on: windows-latest
 
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-    - name: Checkout Repository
-      uses: actions/checkout@v4
-      with:
-        # Full history so SonarCloud can compute new-code / PR diffs accurately.
-        fetch-depth: 0
+      - uses: microsoft/setup-msbuild@v2
+      - uses: NuGet/setup-nuget@v2
+      - uses: darenm/Setup-VSTest@v1.2
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
 
-    - name: Setup MSBuild
-      uses: microsoft/setup-msbuild@v2
+      - uses: actions/cache@v4
+        with:
+          path: ~\sonar\cache
+          key: ${{ runner.os }}-sonar
+          restore-keys: ${{ runner.os }}-sonar
 
-    - name: Setup NuGet
-      uses: NuGet/setup-nuget@v2
+      - shell: powershell
+        name: Install Sonar Tools
+        run: |
+          dotnet tool install --global dotnet-sonarscanner
+          dotnet tool install --global dotnet-coverage
 
-    - name: Setup VSTest
-      uses: darenm/Setup-VSTest@v1.2
+      - name: Locate Solution
+        shell: powershell
+        run: |
+          $sln=Get-ChildItem -Recurse -Filter *.sln|Select-Object -First 1
+          if($null -eq $sln){exit 1}
+          echo "SOLUTION=$($sln.FullName)" >> $env:GITHUB_ENV
 
-    - name: Setup .NET (for global tools)
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: 8.0.x
+      - name: Restore
+        shell: powershell
+        run: nuget restore "$env:SOLUTION"
 
-    - name: Cache SonarCloud packages
-      uses: actions/cache@v4
-      with:
-        path: ~\sonar\cache
-        key: ${{ runner.os }}-sonar
-        restore-keys: ${{ runner.os }}-sonar
+      - name: Sonar Begin
+        shell: powershell
+        run: |
+          dotnet-sonarscanner begin `
+            /o:"almcybage" `
+            /k:"almcybage_kpi-20-test-coverage" `
+            /d:sonar.host.url="https://sonarcloud.io" `
+            /d:sonar.token="6e1bb943a2b4735b188bfc40614dd773446a5af8" `
+            /d:sonar.cs.vscoveragexml.reportsPaths="coverage.xml" `
+            /d:sonar.qualitygate.wait=true
 
-    - name: Install SonarScanner and coverage tools
-      shell: powershell
-      run: |
-        dotnet tool install --global dotnet-sonarscanner
-        dotnet tool install --global dotnet-coverage
+      - name: Build
+        shell: powershell
+        run: msbuild "$env:SOLUTION" /t:Rebuild /p:Configuration=Release
 
-    # Find the solution file automatically
-    - name: Locate Solution File
-      id: solution
-      shell: powershell
-      run: |
-        $sln = Get-ChildItem -Recurse -Filter *.sln | Select-Object -First 1
+      - name: Test with Coverage
+        shell: powershell
+        run: |
+          $dll=Get-ChildItem -Recurse -Filter *.Tests.dll|?{$_.FullName -match "\\bin\\Release\\"}|select -First 1
+          dotnet-coverage collect "vstest.console.exe `"$($dll.FullName)`"" -f xml -o coverage.xml
 
-        if ($null -eq $sln) {
-          Write-Host "No solution file found."
-          exit 1
-        }
+      - name: Sonar End
+        shell: powershell
+        run: dotnet-sonarscanner end /d:sonar.token="${{ secrets.SONAR_TOKEN }}"
 
-        Write-Host "Solution Found:"
-        Write-Host $sln.FullName
+      - name: Build Sonar PR Comment
+        shell: powershell
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_PROJECT_KEY: almcybage_kpi-20-test-coverage
+          SONAR_HOST_URL: https://sonarcloud.io
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          python - << 'PY'
+          import json,os,urllib.request,base64
+          h=os.environ["SONAR_HOST_URL"];p=os.environ["SONAR_PROJECT_KEY"];pr=os.environ["PR_NUMBER"];t=os.environ["SONAR_TOKEN"]
+          def call(path):
+              r=urllib.request.Request(h+path)
+              r.add_header("Authorization","Basic "+base64.b64encode((t+":").encode()).decode())
+              return json.loads(urllib.request.urlopen(r).read().decode())
+          m=call(f"/api/measures/component?component={p}&pullRequest={pr}&metricKeys=alert_status,new_bugs,new_vulnerabilities,new_code_smells,new_security_hotspots,new_coverage,new_duplicated_lines_density")
+          metrics={x["metric"]:x.get("value","-") for x in m["component"]["measures"]}
+          lines=["<!-- sonar-pr-decoration -->","## SonarCloud PR Analysis","",f"- Quality Gate: **{metrics.get('alert_status')}**",f"- Coverage: **{metrics.get('new_coverage')}%**",f"- Duplication: **{metrics.get('new_duplicated_lines_density')}%**","",f"[Open Dashboard]({h}/dashboard?id={p}&pullRequest={pr})"]
+          open("sonar_pr_comment.md","w").write("\n".join(lines))
+          PY
 
-        echo "SOLUTION=$($sln.FullName)" >> $env:GITHUB_ENV
-
-    - name: Restore NuGet Packages
-      shell: powershell
-      run: |
-        nuget restore "$env:SOLUTION"
-
-    # SonarScanner must "begin" BEFORE the build so it can hook into MSBuild.
-    # The scanner auto-detects PR context (key/branch/base) from GitHub Actions,
-    # so no sonar.pullrequest.* parameters are needed here.
-    # sonar.qualitygate.wait=true makes the "end" step block until SonarCloud
-    # finishes analysis and fail the job if the Quality Gate is red.
-    - name: SonarScanner Begin
-      shell: powershell
-      run: |
-        dotnet-sonarscanner begin `
-          /o:"almcybage" `
-          /k:"almcybage_kpi-20-test-coverage" `
-          /d:sonar.host.url="https://sonarcloud.io" `
-          /d:sonar.token="6e1bb943a2b4735b188bfc40614dd773446a5af8" `
-          /d:sonar.cs.vscoveragexml.reportsPaths="coverage.xml" `
-          /d:sonar.qualitygate.wait=true `
-          /d:sonar.exclusions="**/Scripts/**,**/Content/**,**/fonts/**,**/*.min.js,**/*.min.css,**/bin/**,**/obj/**" `
-          /d:sonar.coverage.exclusions="**/Scripts/**,**/Content/**,**/fonts/**,**/App_Start/**,**/Global.asax*,**/Views/**,**/*.Tests/**"
-
-    - name: Build Solution
-      shell: powershell
-      run: |
-        msbuild "$env:SOLUTION" `
-          /t:Rebuild `
-          /p:Configuration=Release
-
-    # Run MSTest through dotnet-coverage so we get a VS coverage XML report
-    # that SonarCloud imports via sonar.cs.vscoveragexml.reportsPaths.
-    - name: Run Tests with Coverage
-      shell: powershell
-      run: |
-        $testDll = Get-ChildItem -Recurse -Filter *.Tests.dll |
-          Where-Object { $_.FullName -match "\\bin\\Release\\" } |
-          Select-Object -First 1
-
-        if ($null -eq $testDll) {
-          Write-Host "No test assembly found."
-          exit 1
-        }
-
-        Write-Host "Test assembly: $($testDll.FullName)"
-
-        dotnet-coverage collect "vstest.console.exe `"$($testDll.FullName)`"" -f xml -o coverage.xml
-
-    # SonarScanner "end" uploads results and (because of qualitygate.wait)
-
-    # polls the Quality Gate, returning a non-zero exit code if it fails.
-    - name: SonarScanner End
-      shell: powershell
-      run: |
-        dotnet-sonarscanner end /d:sonar.token="6e1bb943a2b4735b188bfc40614dd773446a5af8"
-
-    - name: Read OpenCover Coverage
-      if: always()
-      shell: powershell
-      run: |
-        # abc.ps1
-
-        # ----------------------------
-        # Configuration
-        # ----------------------------
-        $GitHubToken = "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"
-        $SonarToken  = "6e1bb943a2b4735b188bfc40614dd773446a5af8"
-
-        $ProjectKey = "almcybage_kpi-20-test-coverage"
-
-        # ----------------------------
-        # GitHub Environment
-        # ----------------------------
-        $event = Get-Content $env:GITHUB_EVENT_PATH | ConvertFrom-Json
-
-        $PrNumber = $event.pull_request.number
-        $CurrentSha = $env:GITHUB_SHA
-
-        $repoInfo = $env:GITHUB_REPOSITORY.Split("/")
-        $Org = $repoInfo[0]
-        $Repo = $repoInfo[1]
-
-        Write-Host "===================================="
-        Write-Host "Organization : $Org"
-        Write-Host "Repository   : $Repo"
-        Write-Host "PR Number    : $PrNumber"
-        Write-Host "Current SHA  : $CurrentSha"
-        Write-Host "===================================="
-
-        # ----------------------------
-        # GitHub Headers
-        # ----------------------------
-                    Write-Host "Token Length: $($GitHubToken.Length)"
-            
-            if ([string]::IsNullOrWhiteSpace($GitHubToken)) {
-                Write-Host "GitHub token is empty!"
-                exit 1
+      - name: Publish Comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs=require('fs');
+            const body=fs.readFileSync('sonar_pr_comment.md','utf8');
+            const marker='<!-- sonar-pr-decoration -->';
+            const {owner,repo}=context.repo;
+            const issue_number=context.issue.number;
+            const comments=await github.paginate(github.rest.issues.listComments,{owner,repo,issue_number});
+            const existing=comments.find(c=>c.user?.type==='Bot'&&c.body?.includes(marker));
+            if(existing){
+              await github.rest.issues.updateComment({owner,repo,comment_id:existing.id,body});
+            }else{
+              await github.rest.issues.createComment({owner,repo,issue_number,body});
             }
-          $ghHeaders = @{
-              Authorization = "Bearer $GitHubToken"
-              Accept = "application/vnd.github+json"
-              "X-GitHub-Api-Version" = "2022-11-28"
-              "User-Agent" = "PowerShell"
-          }
-        # ----------------------------
-        # Sonar Headers
-        # ----------------------------
-        $auth = [Convert]::ToBase64String(
-          [System.Text.Encoding]::ASCII.GetBytes("${SonarToken}:")
-        )
-
-        $sonarHeaders = @{
-          Authorization = "Basic $auth"
-        }
-
-        # ----------------------------
-        # Fetch PR Commits
-        # ----------------------------
-                      Write-Host ""
-              Write-Host "Testing GitHub Token..."
-               
-              try {
-                  $user = Invoke-RestMethod `
-                      -Uri "https://api.github.com/user" `
-                      -Headers $ghHeaders `
-                      -Method Get
-               
-                  Write-Host "Authenticated as: $($user.login)"
-              }
-                catch {
-                    Write-Host "GitHub authentication failed."
-                
-                    if ($_.Exception.Response) {
-                        Write-Host "HTTP Status : $($_.Exception.Response.StatusCode.value__)"
-                
-                        $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
-                        $body = $reader.ReadToEnd()
-                        Write-Host "Response Body:"
-                        Write-Host $body
-                    }
-                
-                    Write-Host $_.Exception.Message
-                    exit 1
-                }
-        $commitUrl = "https://api.github.com/repos/$Org/$Repo/pulls/$PrNumber/commits"
-
-        Write-Host ""
-        Write-Host "Fetching PR commits..."
-        Write-Host $commitUrl
-
-        try {
-          $commits = Invoke-RestMethod `
-            -Uri $commitUrl `
-            -Headers $ghHeaders `
-            -Method Get
-        }
-          catch
-          {
-              Write-Host "Unable to fetch commits."
-           
-              if ($_.Exception.Response) {
-                  Write-Host "HTTP Status: $($_.Exception.Response.StatusCode.value__)"
-              }
-           
-              Write-Host $_.Exception.Message
-              exit 1
-          }
-
-        Write-Host ""
-        Write-Host "========= PR COMMITS ========="
-
-        foreach ($commit in $commits) {
-          Write-Host "---------------------------------------"
-          Write-Host "SHA     : $($commit.sha)"
-          Write-Host "Author  : $($commit.commit.author.name)"
-          Write-Host "Message : $($commit.commit.message)"
-        }
-
-        Write-Host "======================================="
-
-        # ----------------------------
-        # Wait For Sonar Analysis
-        # ----------------------------
-        Write-Host ""
-        Write-Host "Waiting for SonarCloud analysis..."
-
-        $Matched = $false
-
-        for ($i = 1; $i -le 20; $i++) {
-
-          Write-Host ""
-          Write-Host "Attempt $i"
-
-          try {
-            $analysisUrl = "https://sonarcloud.io/api/project_analyses/search?project=$ProjectKey&ps=1"
-
-            $analysis = Invoke-RestMethod `
-              -Uri $analysisUrl `
-              -Headers $sonarHeaders `
-              -Method Get
-
-            if ($analysis.analyses.Count -gt 0) {
-
-              $Revision = $analysis.analyses[0].revision
-
-              Write-Host "Sonar Revision : $Revision"
-
-              if ($Revision -eq $CurrentSha) {
-                Write-Host "Matching Analysis Found."
-                $Matched = $true
-                break
-              }
-              else {
-                Write-Host "Latest Sonar analysis belongs to another commit."
-              }
-            }
-            else {
-              Write-Host "No Sonar analysis available."
-            }
-          }
-          catch {
-            Write-Host $_.Exception.Message
-          }
-
-          Start-Sleep -Seconds 10
-        }
-
-        if (!$Matched) {
-          Write-Host ""
-          Write-Host "Matching Sonar analysis not found."
-          exit 0
-        }
-
-        # ----------------------------
-        # Fetch Coverage
-        # ----------------------------
-        Write-Host ""
-        Write-Host "Fetching Coverage..."
-
-        $measureUrl = "https://sonarcloud.io/api/measures/component?component=$ProjectKey&metricKeys=coverage,new_coverage,alert_status"
-
-        try {
-          $measure = Invoke-RestMethod `
-            -Uri $measureUrl `
-            -Headers $sonarHeaders `
-            -Method Get
-        }
-        catch {
-          Write-Host $_.Exception.Message
-          exit 1
-        }
-
-        Write-Host ""
-        Write-Host "========== SONAR METRICS =========="
-
-        foreach ($m in $measure.component.measures) {
-          Write-Host "$($m.metric) : $($m.value)"
-        }
-
-        Write-Host "=================================="
-        Write-Host ""
-        Write-Host "Script completed successfully."
