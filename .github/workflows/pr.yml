@@ -18,7 +18,7 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v4
       with:
-        # Full history so SonarCloud can compute new-code / PR diffs accurately.
+        # Full history so SonarCloud can compute new-code / PR diffs accurately.d
         fetch-depth: 0
 
     - name: Setup MSBuild
