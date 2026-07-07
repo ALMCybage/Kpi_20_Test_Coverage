@@ -125,54 +125,65 @@ jobs:
       if: always()
       shell: powershell
       run: |
-               # 1. Get PR Number and Current HEAD SHA
-                  $prNumber = $env:PR_NUMBER
-                  $currentSha = $env:GITHUB_SHA
-                   
-                  Write-Host "PR Number: $prNumber"
-                  Write-Host "Current Commit SHA: $currentSha"
-                   
-                  # 2. Fetch all commits of the PR
-                  $prCommits = GetGitHubPRCommits($prNumber)
-                   
-                  # 3. Print all commits
-                  Write-Host "Commits in PR:"
-                  foreach ($commit in $prCommits) {
-                      Write-Host "$($commit.sha) - $($commit.commit.message)"
-                  }
-                   
-                  # 4. Check new commits for AI author/co-author
-                  $aiCommitFound = $false
-                  foreach ($commit in $prCommits) {
-                      if (IsAICommit($commit)) {
-                          $aiCommitFound = $true
-                          Write-Host "AI Commit Found: $($commit.sha)"
-                      }
-                  }
-                   
-                  if (-not $aiCommitFound) {
-                      Write-Host "No AI-assisted commits found."
-                      exit 0
-                  }
-                   
-                  # 5. Query latest SonarQube PR analysis
-                  $sonarAnalysis = GetLatestSonarAnalysis($prNumber)
-                   
-                  # 6. Print SonarQube revision
-                  Write-Host "Sonar Revision: $($sonarAnalysis.revision)"
-                   
-                  # 7. Compare SHAs
-                  if ($sonarAnalysis.revision -ne $currentSha) {
-                      Write-Host "Current Sonar analysis is not yet available."
-                      exit 0
-                  }
-                   
-                  # 8. Fetch Coverage
-                  $coverage = GetSonarCoverage($prNumber)
-                   
-                  # 9. Print Coverage
-                  Write-Host "Coverage: $coverage %"
-                   
-                  # 10. Print Success
-                  Write-Host "Current PR analysis verified successfully."
-        
+        # abc.ps1
+        $GitHubToken = "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"
+        $SonarToken = "6e1bb943a2b4735b188bfc40614dd773446a5af8"
+        $Org = "almcybage"
+        $Repo = "kpi-20-test-coverage"
+        $ProjectKey = "almcybage_kpi-20-test-coverage"
+
+        $PrNumber = $env:PR_NUMBER
+        $CurrentSha = $env:GITHUB_SHA
+
+        Write-Host "PR: $PrNumber"
+        Write-Host "Current SHA: $CurrentSha"
+
+        $ghHeaders = @{
+          Authorization = "Bearer $GitHubToken"
+          Accept        = "application/vnd.github+json"
+        }
+
+        $sonarAuth = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("${SonarToken}:"))
+        $sonarHeaders = @{
+          Authorization = "Basic $sonarAuth"
+        }
+
+        $commitsUrl = "https://api.github.com/repos/$Org/$Repo/pulls/$PrNumber/commits"
+        $commits = Invoke-RestMethod -Uri $commitsUrl -Headers $ghHeaders
+
+        Write-Host "=== PR Commits ==="
+        foreach ($c in $commits) {
+          Write-Host "$($c.sha) - $($c.commit.message)"
+        }
+
+        $matched = $false
+        for ($i = 1; $i -le 20; $i++) {
+          $analysisUrl = "https://sonarcloud.io/api/project_analyses/search?project=$ProjectKey&ps=1"
+          try {
+            $analysis = Invoke-RestMethod -Uri $analysisUrl -Headers $sonarHeaders
+            $revision = $analysis.analyses[0].revision
+            Write-Host "Sonar revision: $revision"
+
+            if ($revision -eq $CurrentSha) {
+              $matched = $true
+              break
+            }
+          }
+          catch {
+          }
+
+          Start-Sleep -Seconds 10
+        }
+
+        if (-not $matched) {
+          Write-Host "Matching Sonar analysis not found."
+          exit 0
+        }
+
+        $measureUrl = "https://sonarcloud.io/api/measures/component?component=$ProjectKey&metricKeys=coverage,new_coverage,alert_status"
+        $measure = Invoke-RestMethod -Uri $measureUrl -Headers $sonarHeaders
+
+        Write-Host "=== Sonar Measures ==="
+        foreach ($m in $measure.component.measures) {
+          Write-Host "$($m.metric): $($m.value)"
+        }
