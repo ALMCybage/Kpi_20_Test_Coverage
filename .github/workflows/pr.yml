@@ -6,7 +6,13 @@ name: PR Validation (Build, Test & SonarCloud Quality Gate)
 on:
   pull_request:
     branches:
-      - main
+      - master
+
+# Needed so the PR-decoration step can post/update a comment on the PR.
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
 
 jobs:
   build:
@@ -18,7 +24,7 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v4
       with:
-        # Full history so SonarCloud can compute new-code / PR diffs accurately.d
+        # Full history so SonarCloud can compute new-code / PR diffs accurately.
         fetch-depth: 0
 
     - name: Setup MSBuild
@@ -114,345 +120,147 @@ jobs:
         dotnet-coverage collect "vstest.console.exe `"$($testDll.FullName)`"" -f xml -o coverage.xml
 
     # SonarScanner "end" uploads results and (because of qualitygate.wait)
-
     # polls the Quality Gate, returning a non-zero exit code if it fails.
     - name: SonarScanner End
       shell: powershell
       run: |
         dotnet-sonarscanner end /d:sonar.token="6e1bb943a2b4735b188bfc40614dd773446a5af8"
-
-    - name: Read OpenCover Coverage
-      if: always()
-      shell: powershell
-      run: |
-        # abc.ps1
-
-        # ----------------------------
-        # Configuration
-        # ----------------------------
-        $GitHubToken = "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"
-        $SonarToken  = "6e1bb943a2b4735b188bfc40614dd773446a5af8"
-
-        $ProjectKey = "almcybage_kpi-20-test-coverage"
-
-        # ----------------------------
-        # GitHub Environment
-        # ----------------------------
-        $event = Get-Content $env:GITHUB_EVENT_PATH | ConvertFrom-Json
-
-        $PrNumber = $event.pull_request.number
-        $CurrentSha = $env:GITHUB_SHA
-
-        $repoInfo = $env:GITHUB_REPOSITORY.Split("/")
-        $Org = $repoInfo[0]
-        $Repo = $repoInfo[1]
-
-        Write-Host "===================================="
-        Write-Host "Organization : $Org"
-        Write-Host "Repository   : $Repo"
-        Write-Host "PR Number    : $PrNumber"
-        Write-Host "Current SHA  : $CurrentSha"
-        Write-Host "===================================="
-
-        # ----------------------------
-        # GitHub Headers
-        # ----------------------------
-                    Write-Host "Token Length: $($GitHubToken.Length)"
-            
-            if ([string]::IsNullOrWhiteSpace($GitHubToken)) {
-                Write-Host "GitHub token is empty!"
-                exit 1
-            }
-          $ghHeaders = @{
-              Authorization = "Bearer $GitHubToken"
-              Accept = "application/vnd.github+json"
-              "X-GitHub-Api-Version" = "2022-11-28"
-              "User-Agent" = "PowerShell"
-          }
-        # ----------------------------
-        # Sonar Headers
-        # ----------------------------
-        $auth = [Convert]::ToBase64String(
-          [System.Text.Encoding]::ASCII.GetBytes("${SonarToken}:")
-        )
-
-        $sonarHeaders = @{
-          Authorization = "Basic $auth"
-        }
-
-        # ----------------------------
-        # Fetch PR Commits
-        # ----------------------------
-                      Write-Host ""
-              Write-Host "Testing GitHub Token..."
-               
-              try {
-                  $user = Invoke-RestMethod `
-                      -Uri "https://api.github.com/user" `
-                      -Headers $ghHeaders `
-                      -Method Get
-               
-                  Write-Host "Authenticated as: $($user.login)"
-              }
-                catch {
-                    Write-Host "GitHub authentication failed."
-                
-                    if ($_.Exception.Response) {
-                        Write-Host "HTTP Status : $($_.Exception.Response.StatusCode.value__)"
-                
-                        $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
-                        $body = $reader.ReadToEnd()
-                        Write-Host "Response Body:"
-                        Write-Host $body
-                    }
-                
-                    Write-Host $_.Exception.Message
-                    exit 1
-                }
-        $commitUrl = "https://api.github.com/repos/$Org/$Repo/pulls/$PrNumber/commits"
-
-        Write-Host ""
-        Write-Host "Fetching PR commits..."
-        Write-Host $commitUrl
-
-        try {
-          $commits = Invoke-RestMethod `
-            -Uri $commitUrl `
-            -Headers $ghHeaders `
-            -Method Get
-        }
-          catch
-          {
-              Write-Host "Unable to fetch commits."
-           
-              if ($_.Exception.Response) {
-                  Write-Host "HTTP Status: $($_.Exception.Response.StatusCode.value__)"
-              }
-           
-              Write-Host $_.Exception.Message
-              exit 1
-          }
-
-        Write-Host ""
-        Write-Host "========= PR COMMITS ========="
-
-        foreach ($commit in $commits) {
-          Write-Host "---------------------------------------"
-          Write-Host "SHA     : $($commit.sha)"
-          Write-Host "Author  : $($commit.commit.author.name)"
-          Write-Host "Message : $($commit.commit.message)"
-        }
-
-        Write-Host "======================================="
-
-        # ----------------------------
-        # Wait For Sonar Analysis
-        # ----------------------------
-        Write-Host ""
-        Write-Host "Waiting for SonarCloud analysis..."
-
-        $Matched = $false
-
-        for ($i = 1; $i -le 20; $i++) {
-
-          Write-Host ""
-          Write-Host "Attempt $i"
-
-          try {
-            $analysisUrl = "https://sonarcloud.io/api/project_analyses/search?project=$ProjectKey&ps=1"
-
-            $analysis = Invoke-RestMethod `
-              -Uri $analysisUrl `
-              -Headers $sonarHeaders `
-              -Method Get
-
-            if ($analysis.analyses.Count -gt 0) {
-
-              $Revision = $analysis.analyses[0].revision
-
-              Write-Host "Sonar Revision : $Revision"
-
-              if ($Revision -eq $CurrentSha) {
-                Write-Host "Matching Analysis Found."
-                $Matched = $true
-                break
-              }
-              else {
-                Write-Host "Latest Sonar analysis belongs to another commit."
-              }
-            }
-            else {
-              Write-Host "No Sonar analysis available."
-            }
-          }
-          catch {
-            Write-Host $_.Exception.Message
-          }
-
-          Start-Sleep -Seconds 10
-        }
-
-        if (!$Matched) {
-          Write-Host ""
-          Write-Host "Matching Sonar analysis not found."
-          exit 0
-        }
-
-        # ----------------------------
-        # Fetch Coverage
-        # ----------------------------
-        Write-Host ""
-        Write-Host "Fetching Coverage..."
-
-        $measureUrl = "https://sonarcloud.io/api/measures/component?component=$ProjectKey&metricKeys=coverage,new_coverage,alert_status"
-
-        try {
-          $measure = Invoke-RestMethod `
-            -Uri $measureUrl `
-            -Headers $sonarHeaders `
-            -Method Get
-        }
-        catch {
-          Write-Host $_.Exception.Message
-          exit 1
-        }
-
-        Write-Host ""
-        Write-Host "========== SONAR METRICS =========="
-
-        foreach ($m in $measure.component.measures) {
-          Write-Host "$($m.metric) : $($m.value)"
-        }
-
-        Write-Host "=================================="
-        Write-Host ""
-        Write-Host "Script completed successfully."
-    - name: Validate SonarCloud configuration
-      shell: powershell
-      run: |
-        if (-not "6e1bb943a2b4735b188bfc40614dd773446a5af8") {
-          Write-Host "Missing required secret: SONAR_TOKEN"
-          exit 1
-        }
-
+        
+    # ----------------------------------------------------------------------
+    # Manish's PR-decoration logic, adapted to this project:
+    #   - Pull PR metrics/issues from SonarCloud
+    #   - Build a Markdown summary
+    #   - Post (or update) it as a comment on the PR
+    # Runs even when the Quality Gate fails, so the summary always appears.
+    # The Python heredoc needs bash (PowerShell is the Windows default shell).
+    # ----------------------------------------------------------------------
     - name: Build SonarCloud PR decoration comment
-      shell: powershell
+      if: always()
+      shell: bash
       env:
-        SONAR_TOKEN: 6e1bb943a2b4735b188bfc40614dd773446a5af8
+        SONAR_TOKEN: "6e1bb943a2b4735b188bfc40614dd773446a5af8"
         SONAR_PROJECT_KEY: almcybage_kpi-20-test-coverage
         SONAR_HOST_URL: https://sonarcloud.io
         PR_NUMBER: ${{ github.event.pull_request.number }}
       run: |
         python - << 'PY'
-        
-            import json
-            import os
-            import urllib.request
-            import base64
-        
-            host = os.environ["SONAR_HOST_URL"]
-            project = os.environ["SONAR_PROJECT_KEY"]
-            pr = os.environ["PR_NUMBER"]
-            token = os.environ["SONAR_TOKEN"]
-        
-            def call(path):
-                url = f"{host}{path}"
-        
-                req = urllib.request.Request(url)
-        
-                auth = (token + ":").encode("utf-8")
-        
-                req.add_header(
-                    "Authorization",
-                    "Basic " + base64.b64encode(auth).decode("utf-8")
-                )
-        
-                with urllib.request.urlopen(req, timeout=30) as resp:
-                    return json.loads(resp.read().decode("utf-8"))
-        
-            measures = call(
-                "/api/measures/component?component=" + project
-                + "&pullRequest=" + pr
-                + "&metricKeys=alert_status,new_bugs,new_vulnerabilities,new_code_smells,new_security_hotspots,new_coverage,new_duplicated_lines_density"
-            )
-        
-            issues = call(
-                "/api/issues/search?componentKeys=" + project
-                + "&pullRequest=" + pr
-                + "&types=BUG,VULNERABILITY,CODE_SMELL"
-                + "&ps=5&s=SEVERITY"
-            )
-        
-            issue_counts = call(
-                "/api/issues/search?componentKeys=" + project
-                + "&pullRequest=" + pr
-                + "&types=BUG,VULNERABILITY,CODE_SMELL"
-                + "&facets=types&ps=1"
-            )
-        
-            metrics = {
-                m["metric"]: m.get("value", "-")
-                for m in measures.get("component", {}).get("measures", [])
-            }
-        
-            quality = metrics.get("alert_status", "UNKNOWN")
-        
-            total = issues.get("total", 0)
-        
-            top_issues = issues.get("issues", [])
-        
-            type_counts = {
-                "BUG": "0",
-                "VULNERABILITY": "0",
-                "CODE_SMELL": "0"
-            }
-        
-            for facet in issue_counts.get("facets", []):
-        
-                if facet.get("property") == "types":
-        
-                    for val in facet.get("values", []):
-        
-                        if val["val"] in type_counts:
-        
-                            type_counts[val["val"]] = str(val["count"])
-        
-            lines = []
-        
-            lines.append("<!-- sonar-pr-decoration -->")
-            lines.append("## SonarCloud PR Analysis")
-            lines.append("")
-            lines.append(f"- Quality Gate: **{quality}**")
-            lines.append(f"- New Bugs: **{type_counts['BUG']}**")
-            lines.append(f"- New Vulnerabilities: **{type_counts['VULNERABILITY']}**")
-            lines.append(f"- New Code Smells: **{type_counts['CODE_SMELL']}**")
-            lines.append(f"- New Security Hotspots: **{metrics.get('new_security_hotspots','0')}**")
-            lines.append(f"- New Coverage: **{metrics.get('new_coverage','N/A')}%**")
-            lines.append(f"- New Duplication: **{metrics.get('new_duplicated_lines_density','N/A')}%**")
-            lines.append("")
-            lines.append(f"Total new issues: **{total}**")
-        
-            if top_issues:
-        
-                lines.append("")
-                lines.append("### Top Sonar Issues")
-        
-                for item in top_issues:
-        
-                    lines.append(
-                        f"- [{item['type']}/{item['severity']}] "
-                        f"{item['message']} (`{item['rule']}`)"
-                    )
-        
-            lines.append("")
-            lines.append(
-                f"[Open SonarCloud Dashboard]"
-                f"({host}/dashboard?id={project}&pullRequest={pr})"
-            )
-        
-            with open("sonar_pr_comment.md", "w", encoding="utf-8") as f:
-        
-                f.write("\n".join(lines))
-        
-            PY
+        import json
+        import os
+        import urllib.request
 
+        host = os.environ["SONAR_HOST_URL"]
+        project = os.environ["SONAR_PROJECT_KEY"]
+        pr = os.environ["PR_NUMBER"]
+        token = os.environ["SONAR_TOKEN"]
+
+        def call(path):
+            url = f"{host}{path}"
+            req = urllib.request.Request(url)
+            auth = (token + ":").encode("utf-8")
+            import base64
+            req.add_header("Authorization", "Basic " + base64.b64encode(auth).decode("utf-8"))
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+
+        measures = call(
+            "/api/measures/component?component=" + project
+            + "&pullRequest=" + pr
+            + "&metricKeys=alert_status,new_bugs,new_vulnerabilities,new_code_smells,new_security_hotspots,new_coverage,new_duplicated_lines_density"
+        )
+        issues = call(
+            "/api/issues/search?componentKeys=" + project
+            + "&pullRequest=" + pr
+            + "&types=BUG,VULNERABILITY,CODE_SMELL"
+            + "&ps=5&s=SEVERITY"
+        )
+        issue_counts = call(
+            "/api/issues/search?componentKeys=" + project
+            + "&pullRequest=" + pr
+            + "&types=BUG,VULNERABILITY,CODE_SMELL"
+            + "&facets=types&ps=1"
+        )
+
+        metrics = {m["metric"]: m.get("value", "-") for m in measures.get("component", {}).get("measures", [])}
+        quality = metrics.get("alert_status", "UNKNOWN")
+        total = issues.get("total", 0)
+        top_issues = issues.get("issues", [])
+
+        type_counts = {"BUG": "0", "VULNERABILITY": "0", "CODE_SMELL": "0"}
+        for facet in issue_counts.get("facets", []):
+            if facet.get("property") == "types":
+                for val in facet.get("values", []):
+                    key = val.get("val")
+                    if key in type_counts:
+                        type_counts[key] = str(val.get("count", 0))
+
+        new_coverage = metrics.get("new_coverage")
+        new_duplication = metrics.get("new_duplicated_lines_density")
+        new_hotspots = metrics.get("new_security_hotspots", "0")
+
+        lines = []
+        lines.append("<!-- sonar-pr-decoration -->")
+        lines.append("## SonarCloud PR Analysis")
+        lines.append("")
+        lines.append(f"- Quality Gate: **{quality}**")
+        lines.append(f"- New Bugs: **{type_counts['BUG']}**")
+        lines.append(f"- New Vulnerabilities: **{type_counts['VULNERABILITY']}**")
+        lines.append(f"- New Code Smells: **{type_counts['CODE_SMELL']}**")
+        lines.append(f"- New Security Hotspots: **{new_hotspots}**")
+        lines.append(f"- New Coverage: **{new_coverage + '%' if new_coverage is not None else 'N/A'}**")
+        lines.append(f"- New Duplication: **{new_duplication + '%' if new_duplication is not None else 'N/A'}**")
+        lines.append("")
+        lines.append(f"Total new issues in PR: **{total}**")
+
+        if top_issues:
+            lines.append("")
+            lines.append("### Top Sonar Issues")
+            for item in top_issues:
+                rule = item.get("rule", "unknown")
+                sev = item.get("severity", "-")
+                typ = item.get("type", "-")
+                msg = item.get("message", "").replace("\n", " ")
+                lines.append(f"- [{typ}/{sev}] {msg} (`{rule}`)")
+
+        lines.append("")
+        lines.append(f"[Open full SonarCloud PR dashboard]({host}/dashboard?id={project}&pullRequest={pr})")
+
+        with open("sonar_pr_comment.md", "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+        PY
+
+    - name: Publish SonarCloud PR decoration comment
+      if: always()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const marker = '<!-- sonar-pr-decoration -->';
+          const body = fs.readFileSync('sonar_pr_comment.md', 'utf8');
+
+          const { owner, repo } = context.repo;
+          const issue_number = context.issue.number;
+
+          const comments = await github.paginate(github.rest.issues.listComments, {
+            owner,
+            repo,
+            issue_number,
+            per_page: 100,
+          });
+
+          const existing = comments.find(c => c.user?.type === 'Bot' && c.body?.includes(marker));
+
+          if (existing) {
+            await github.rest.issues.updateComment({
+              owner,
+              repo,
+              comment_id: existing.id,
+              body,
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number,
+              body,
+            });
+          }
