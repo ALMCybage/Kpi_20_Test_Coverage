@@ -121,4 +121,209 @@ jobs:
       run: |
         dotnet-sonarscanner end /d:sonar.token="6e1bb943a2b4735b188bfc40614dd773446a5af8"
 
-    
+    - name: Read OpenCover Coverage
+      if: always()
+      shell: powershell
+      run: |
+        # abc.ps1
+
+        # ----------------------------
+        # Configuration
+        # ----------------------------
+        $GitHubToken = "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"
+        $SonarToken  = "6e1bb943a2b4735b188bfc40614dd773446a5af8"
+
+        $ProjectKey = "almcybage_kpi-20-test-coverage"
+
+        # ----------------------------
+        # GitHub Environment
+        # ----------------------------
+        $event = Get-Content $env:GITHUB_EVENT_PATH | ConvertFrom-Json
+
+        $PrNumber = $event.pull_request.number
+        $CurrentSha = $env:GITHUB_SHA
+
+        $repoInfo = $env:GITHUB_REPOSITORY.Split("/")
+        $Org = $repoInfo[0]
+        $Repo = $repoInfo[1]
+
+        Write-Host "===================================="
+        Write-Host "Organization : $Org"
+        Write-Host "Repository   : $Repo"
+        Write-Host "PR Number    : $PrNumber"
+        Write-Host "Current SHA  : $CurrentSha"
+        Write-Host "===================================="
+
+        # ----------------------------
+        # GitHub Headers
+        # ----------------------------
+                    Write-Host "Token Length: $($GitHubToken.Length)"
+            
+            if ([string]::IsNullOrWhiteSpace($GitHubToken)) {
+                Write-Host "GitHub token is empty!"
+                exit 1
+            }
+          $ghHeaders = @{
+              Authorization = "Bearer $GitHubToken"
+              Accept = "application/vnd.github+json"
+              "X-GitHub-Api-Version" = "2022-11-28"
+              "User-Agent" = "PowerShell"
+          }
+        # ----------------------------
+        # Sonar Headers
+        # ----------------------------
+        $auth = [Convert]::ToBase64String(
+          [System.Text.Encoding]::ASCII.GetBytes("${SonarToken}:")
+        )
+
+        $sonarHeaders = @{
+          Authorization = "Basic $auth"
+        }
+
+        # ----------------------------
+        # Fetch PR Commits
+        # ----------------------------
+                      Write-Host ""
+              Write-Host "Testing GitHub Token..."
+               
+              try {
+                  $user = Invoke-RestMethod `
+                      -Uri "https://api.github.com/user" `
+                      -Headers $ghHeaders `
+                      -Method Get
+               
+                  Write-Host "Authenticated as: $($user.login)"
+              }
+                catch {
+                    Write-Host "GitHub authentication failed."
+                
+                    if ($_.Exception.Response) {
+                        Write-Host "HTTP Status : $($_.Exception.Response.StatusCode.value__)"
+                
+                        $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+                        $body = $reader.ReadToEnd()
+                        Write-Host "Response Body:"
+                        Write-Host $body
+                    }
+                
+                    Write-Host $_.Exception.Message
+                    exit 1
+                }
+        $commitUrl = "https://api.github.com/repos/$Org/$Repo/pulls/$PrNumber/commits"
+
+        Write-Host ""
+        Write-Host "Fetching PR commits..."
+        Write-Host $commitUrl
+
+        try {
+          $commits = Invoke-RestMethod `
+            -Uri $commitUrl `
+            -Headers $ghHeaders `
+            -Method Get
+        }
+          catch
+          {
+              Write-Host "Unable to fetch commits."
+           
+              if ($_.Exception.Response) {
+                  Write-Host "HTTP Status: $($_.Exception.Response.StatusCode.value__)"
+              }
+           
+              Write-Host $_.Exception.Message
+              exit 1
+          }
+
+        Write-Host ""
+        Write-Host "========= PR COMMITS ========="
+
+        foreach ($commit in $commits) {
+          Write-Host "---------------------------------------"
+          Write-Host "SHA     : $($commit.sha)"
+          Write-Host "Author  : $($commit.commit.author.name)"
+          Write-Host "Message : $($commit.commit.message)"
+        }
+
+        Write-Host "======================================="
+
+        # ----------------------------
+        # Wait For Sonar Analysis
+        # ----------------------------
+        Write-Host ""
+        Write-Host "Waiting for SonarCloud analysis..."
+
+        $Matched = $false
+
+        for ($i = 1; $i -le 20; $i++) {
+
+          Write-Host ""
+          Write-Host "Attempt $i"
+
+          try {
+            $analysisUrl = "https://sonarcloud.io/api/project_analyses/search?project=$ProjectKey&ps=1"
+
+            $analysis = Invoke-RestMethod `
+              -Uri $analysisUrl `
+              -Headers $sonarHeaders `
+              -Method Get
+
+            if ($analysis.analyses.Count -gt 0) {
+
+              $Revision = $analysis.analyses[0].revision
+
+              Write-Host "Sonar Revision : $Revision"
+
+              if ($Revision -eq $CurrentSha) {
+                Write-Host "Matching Analysis Found."
+                $Matched = $true
+                break
+              }
+              else {
+                Write-Host "Latest Sonar analysis belongs to another commit."
+              }
+            }
+            else {
+              Write-Host "No Sonar analysis available."
+            }
+          }
+          catch {
+            Write-Host $_.Exception.Message
+          }
+
+          Start-Sleep -Seconds 10
+        }
+
+        if (!$Matched) {
+          Write-Host ""
+          Write-Host "Matching Sonar analysis not found."
+          exit 0
+        }
+
+        # ----------------------------
+        # Fetch Coverage
+        # ----------------------------
+        Write-Host ""
+        Write-Host "Fetching Coverage..."
+
+        $measureUrl = "https://sonarcloud.io/api/measures/component?component=$ProjectKey&metricKeys=coverage,new_coverage,alert_status"
+
+        try {
+          $measure = Invoke-RestMethod `
+            -Uri $measureUrl `
+            -Headers $sonarHeaders `
+            -Method Get
+        }
+        catch {
+          Write-Host $_.Exception.Message
+          exit 1
+        }
+
+        Write-Host ""
+        Write-Host "========== SONAR METRICS =========="
+
+        foreach ($m in $measure.component.measures) {
+          Write-Host "$($m.metric) : $($m.value)"
+        }
+
+        Write-Host "=================================="
+        Write-Host ""
+        Write-Host "Script completed successfully."
