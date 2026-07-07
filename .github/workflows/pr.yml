@@ -122,6 +122,7 @@ jobs:
         dotnet-sonarscanner end /d:sonar.token="6e1bb943a2b4735b188bfc40614dd773446a5af8"
 
     - name: Read OpenCover Coverage
+      if: always()
       shell: powershell
       run: |
                # 1. Get PR Number and Current HEAD SHA
