@@ -130,7 +130,7 @@ jobs:
         # ----------------------------
         # Configuration
         # ----------------------------
-        $GitHubToken = "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"
+        $GitHubToken = "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"
         $SonarToken  = "6e1bb943a2b4735b188bfc40614dd773446a5af8"
 
         $ProjectKey = "almcybage_kpi-20-test-coverage"
