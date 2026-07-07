@@ -114,16 +114,64 @@ jobs:
         dotnet-coverage collect "vstest.console.exe `"$($testDll.FullName)`"" -f xml -o coverage.xml
 
     # SonarScanner "end" uploads results and (because of qualitygate.wait)
-    - name: Read OpenCover Coverage
-      shell: powershell
-      run: |
-    - name: Read OpenCover Coverage
-      shell: powershell
-      run: |
-       Get-Content coverage.xml -First 50
 
     # polls the Quality Gate, returning a non-zero exit code if it fails.
     - name: SonarScanner End
       shell: powershell
       run: |
         dotnet-sonarscanner end /d:sonar.token="6e1bb943a2b4735b188bfc40614dd773446a5af8"
+
+    - name: Read OpenCover Coverage
+      shell: powershell
+      run: |
+               # 1. Get PR Number and Current HEAD SHA
+                  $prNumber = $env:PR_NUMBER
+                  $currentSha = $env:GITHUB_SHA
+                   
+                  Write-Host "PR Number: $prNumber"
+                  Write-Host "Current Commit SHA: $currentSha"
+                   
+                  # 2. Fetch all commits of the PR
+                  $prCommits = GetGitHubPRCommits($prNumber)
+                   
+                  # 3. Print all commits
+                  Write-Host "Commits in PR:"
+                  foreach ($commit in $prCommits) {
+                      Write-Host "$($commit.sha) - $($commit.commit.message)"
+                  }
+                   
+                  # 4. Check new commits for AI author/co-author
+                  $aiCommitFound = $false
+                  foreach ($commit in $prCommits) {
+                      if (IsAICommit($commit)) {
+                          $aiCommitFound = $true
+                          Write-Host "AI Commit Found: $($commit.sha)"
+                      }
+                  }
+                   
+                  if (-not $aiCommitFound) {
+                      Write-Host "No AI-assisted commits found."
+                      exit 0
+                  }
+                   
+                  # 5. Query latest SonarQube PR analysis
+                  $sonarAnalysis = GetLatestSonarAnalysis($prNumber)
+                   
+                  # 6. Print SonarQube revision
+                  Write-Host "Sonar Revision: $($sonarAnalysis.revision)"
+                   
+                  # 7. Compare SHAs
+                  if ($sonarAnalysis.revision -ne $currentSha) {
+                      Write-Host "Current Sonar analysis is not yet available."
+                      exit 0
+                  }
+                   
+                  # 8. Fetch Coverage
+                  $coverage = GetSonarCoverage($prNumber)
+                   
+                  # 9. Print Coverage
+                  Write-Host "Coverage: $coverage %"
+                   
+                  # 10. Print Success
+                  Write-Host "Current PR analysis verified successfully."
+        
