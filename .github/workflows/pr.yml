@@ -6,7 +6,7 @@ name: PR Validation (Build, Test & SonarCloud Quality Gate)
 on:
   pull_request:
     branches:
-      - master
+      - main
 
 # Needed so the PR-decoration step can post/update a comment on the PR.#
 permissions:
