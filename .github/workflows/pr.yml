@@ -8,7 +8,7 @@ on:
     branches:
       - main
 
-# Needed so the PR-decoration step can post/update a comment on the PR.#
+# Needed so the PR-decoration step can post/update a comment on the PR.
 permissions:
   contents: read
   pull-requests: write
@@ -125,7 +125,8 @@ jobs:
       shell: powershell
       run: |
         dotnet-sonarscanner end /d:sonar.token="6e1bb943a2b4735b188bfc40614dd773446a5af8"
-        
+
+
     # ----------------------------------------------------------------------
     # Manish's PR-decoration logic, adapted to this project:
     #   - Pull PR metrics/issues from SonarCloud
@@ -146,6 +147,7 @@ jobs:
         python - << 'PY'
         import json
         import os
+        import base64
         import urllib.request
 
         host = os.environ["SONAR_HOST_URL"]
@@ -157,72 +159,37 @@ jobs:
             url = f"{host}{path}"
             req = urllib.request.Request(url)
             auth = (token + ":").encode("utf-8")
-            import base64
             req.add_header("Authorization", "Basic " + base64.b64encode(auth).decode("utf-8"))
             with urllib.request.urlopen(req, timeout=30) as resp:
                 return json.loads(resp.read().decode("utf-8"))
 
+        def measure_value(m):
+            # New-code metrics (e.g. new_coverage) return their value under
+            # "period"/"periods", NOT "value" -- read whichever is present.
+            if m.get("value") is not None:
+                return m["value"]
+            p = m.get("period")
+            if isinstance(p, dict) and p.get("value") is not None:
+                return p["value"]
+            ps = m.get("periods")
+            if isinstance(ps, list) and ps and ps[0].get("value") is not None:
+                return ps[0]["value"]
+            return None
+
         measures = call(
             "/api/measures/component?component=" + project
             + "&pullRequest=" + pr
-            + "&metricKeys=alert_status,new_bugs,new_vulnerabilities,new_code_smells,new_security_hotspots,new_coverage,new_duplicated_lines_density"
-        )
-        issues = call(
-            "/api/issues/search?componentKeys=" + project
-            + "&pullRequest=" + pr
-            + "&types=BUG,VULNERABILITY,CODE_SMELL"
-            + "&ps=5&s=SEVERITY"
-        )
-        issue_counts = call(
-            "/api/issues/search?componentKeys=" + project
-            + "&pullRequest=" + pr
-            + "&types=BUG,VULNERABILITY,CODE_SMELL"
-            + "&facets=types&ps=1"
+            + "&metricKeys=new_coverage"
         )
 
-        metrics = {m["metric"]: m.get("value", "-") for m in measures.get("component", {}).get("measures", [])}
-        quality = metrics.get("alert_status", "UNKNOWN")
-        total = issues.get("total", 0)
-        top_issues = issues.get("issues", [])
-
-        type_counts = {"BUG": "0", "VULNERABILITY": "0", "CODE_SMELL": "0"}
-        for facet in issue_counts.get("facets", []):
-            if facet.get("property") == "types":
-                for val in facet.get("values", []):
-                    key = val.get("val")
-                    if key in type_counts:
-                        type_counts[key] = str(val.get("count", 0))
-
+        metrics = {m["metric"]: measure_value(m) for m in measures.get("component", {}).get("measures", [])}
         new_coverage = metrics.get("new_coverage")
-        new_duplication = metrics.get("new_duplicated_lines_density")
-        new_hotspots = metrics.get("new_security_hotspots", "0")
 
         lines = []
         lines.append("<!-- sonar-pr-decoration -->")
         lines.append("## SonarCloud PR Analysis")
         lines.append("")
-        lines.append(f"- Quality Gate: **{quality}**")
-        lines.append(f"- New Bugs: **{type_counts['BUG']}**")
-        lines.append(f"- New Vulnerabilities: **{type_counts['VULNERABILITY']}**")
-        lines.append(f"- New Code Smells: **{type_counts['CODE_SMELL']}**")
-        lines.append(f"- New Security Hotspots: **{new_hotspots}**")
         lines.append(f"- New Coverage: **{new_coverage + '%' if new_coverage is not None else 'N/A'}**")
-        lines.append(f"- New Duplication: **{new_duplication + '%' if new_duplication is not None else 'N/A'}**")
-        lines.append("")
-        lines.append(f"Total new issues in PR: **{total}**")
-
-        if top_issues:
-            lines.append("")
-            lines.append("### Top Sonar Issues")
-            for item in top_issues:
-                rule = item.get("rule", "unknown")
-                sev = item.get("severity", "-")
-                typ = item.get("type", "-")
-                msg = item.get("message", "").replace("\n", " ")
-                lines.append(f"- [{typ}/{sev}] {msg} (`{rule}`)")
-
-        lines.append("")
-        lines.append(f"[Open full SonarCloud PR dashboard]({host}/dashboard?id={project}&pullRequest={pr})")
 
         with open("sonar_pr_comment.md", "w", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
