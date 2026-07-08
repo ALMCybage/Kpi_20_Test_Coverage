@@ -122,6 +122,7 @@ jobs:
            dotnet-sonarscanner end /d:sonar.token="6e1bb943a2b4735b188bfc40614dd773446a5af8"
 
     - name: Validate SonarCloud configuration
+      if: always()
       shell: powershell
       env:
         SONAR_TOKEN: 6e1bb943a2b4735b188bfc40614dd773446a5af8
@@ -136,6 +137,7 @@ jobs:
 
 
     - name: Build SonarCloud PR decoration comment
+      if: always()
       shell: bash
       env:
           SONAR_TOKEN: 6e1bb943a2b4735b188bfc40614dd773446a5af8
