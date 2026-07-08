@@ -119,26 +119,31 @@ jobs:
     - name: SonarScanner End
       shell: powershell
       run: |
-        dotnet-sonarscanner end /d:sonar.token="6e1bb943a2b4735b188bfc40614dd773446a5af8"
+           dotnet-sonarscanner end /d:sonar.token="6e1bb943a2b4735b188bfc40614dd773446a5af8"
 
-        - name: Validate SonarCloud configuration
-          shell: powershell
-          run: |
-            if (-not "6e1bb943a2b4735b188bfc40614dd773446a5af8") {
-              Write-Host "Missing required secret: SONAR_TOKEN"
-              exit 1
-            }
+    - name: Validate SonarCloud configuration
+      shell: powershell
+      env:
+        SONAR_TOKEN: 6e1bb943a2b4735b188bfc40614dd773446a5af8
+      run: |
+        if (-not $env:SONAR_TOKEN) {
+          Write-Host "Missing required secret: SONAR_TOKEN"
+          exit 1
+        }
 
 
-            - name: Build SonarCloud PR decoration comment
-              shell: powershell
-              env:
-                SONAR_TOKEN: 6e1bb943a2b4735b188bfc40614dd773446a5af8
-                SONAR_PROJECT_KEY: almcybage_kpi-20-test-coverage
-                SONAR_HOST_URL: https://sonarcloud.io
-                PR_NUMBER: ${{ github.event.pull_request.number }}
-              run: |
-                python - << 'PY'
+
+
+
+    - name: Build SonarCloud PR decoration comment
+      shell: bash
+      env:
+          SONAR_TOKEN: 6e1bb943a2b4735b188bfc40614dd773446a5af8
+          SONAR_PROJECT_KEY: almcybage_kpi-20-test-coverage
+          SONAR_HOST_URL: https://sonarcloud.io
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+      run: |
+               python <<'PY'
             
                 import json
                 import os
@@ -191,9 +196,7 @@ jobs:
                 }
             
                 quality = metrics.get("alert_status", "UNKNOWN")
-            
                 total = issues.get("total", 0)
-            
                 top_issues = issues.get("issues", [])
             
                 type_counts = {
@@ -203,13 +206,9 @@ jobs:
                 }
             
                 for facet in issue_counts.get("facets", []):
-            
                     if facet.get("property") == "types":
-            
                         for val in facet.get("values", []):
-            
                             if val["val"] in type_counts:
-            
                                 type_counts[val["val"]] = str(val["count"])
             
                 lines = []
@@ -221,19 +220,16 @@ jobs:
                 lines.append(f"- New Bugs: **{type_counts['BUG']}**")
                 lines.append(f"- New Vulnerabilities: **{type_counts['VULNERABILITY']}**")
                 lines.append(f"- New Code Smells: **{type_counts['CODE_SMELL']}**")
-                lines.append(f"- New Security Hotspots: **{metrics.get('new_security_hotspots','0')}**")
-                lines.append(f"- New Coverage: **{metrics.get('new_coverage','N/A')}%**")
-                lines.append(f"- New Duplication: **{metrics.get('new_duplicated_lines_density','N/A')}%**")
+                lines.append(f"- New Security Hotspots: **{metrics.get('new_security_hotspots', '0')}**")
+                lines.append(f"- New Coverage: **{metrics.get('new_coverage', 'N/A')}%**")
+                lines.append(f"- New Duplication: **{metrics.get('new_duplicated_lines_density', 'N/A')}%**")
                 lines.append("")
                 lines.append(f"Total new issues: **{total}**")
             
                 if top_issues:
-            
                     lines.append("")
                     lines.append("### Top Sonar Issues")
-            
                     for item in top_issues:
-            
                         lines.append(
                             f"- [{item['type']}/{item['severity']}] "
                             f"{item['message']} (`{item['rule']}`)"
@@ -246,9 +242,7 @@ jobs:
                 )
             
                 with open("sonar_pr_comment.md", "w", encoding="utf-8") as f:
-            
                     f.write("\n".join(lines))
             
                 PY
-
-    
+      
