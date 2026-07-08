@@ -8,6 +8,12 @@ on:
     branches:
       - main
 
+# Needed so the PR-decoration step can post/update a comment on the PR.
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
 jobs:
   build:
 
@@ -114,137 +120,114 @@ jobs:
         dotnet-coverage collect "vstest.console.exe `"$($testDll.FullName)`"" -f xml -o coverage.xml
 
     # SonarScanner "end" uploads results and (because of qualitygate.wait)
-
     # polls the Quality Gate, returning a non-zero exit code if it fails.
     - name: SonarScanner End
       shell: powershell
       run: |
-           dotnet-sonarscanner end /d:sonar.token="6e1bb943a2b4735b188bfc40614dd773446a5af8"
-
-    - name: Validate SonarCloud configuration
-      if: always()
-      shell: powershell
-      env:
-        SONAR_TOKEN: 6e1bb943a2b4735b188bfc40614dd773446a5af8
-      run: |
-        if (-not $env:SONAR_TOKEN) {
-          Write-Host "Missing required secret: SONAR_TOKEN"
-          exit 1
-        }
+        dotnet-sonarscanner end /d:sonar.token="6e1bb943a2b4735b188bfc40614dd773446a5af8"
 
 
-
-
-
+    # ----------------------------------------------------------------------
+    # Manish's PR-decoration logic, adapted to this project:
+    #   - Pull PR metrics/issues from SonarCloud
+    #   - Build a Markdown summary
+    #   - Post (or update) it as a comment on the PR
+    # Runs even when the Quality Gate fails, so the summary always appears.
+    # The Python heredoc needs bash (PowerShell is the Windows default shell).
+    # ----------------------------------------------------------------------
     - name: Build SonarCloud PR decoration comment
       if: always()
       shell: bash
       env:
-          SONAR_TOKEN: 6e1bb943a2b4735b188bfc40614dd773446a5af8
-          SONAR_PROJECT_KEY: almcybage_kpi-20-test-coverage
-          SONAR_HOST_URL: https://sonarcloud.io
-          PR_NUMBER: ${{ github.event.pull_request.number }}
+        SONAR_TOKEN: "6e1bb943a2b4735b188bfc40614dd773446a5af8"
+        SONAR_PROJECT_KEY: almcybage_kpi-20-test-coverage
+        SONAR_HOST_URL: https://sonarcloud.io
+        PR_NUMBER: ${{ github.event.pull_request.number }}
       run: |
-               python <<'PY'
-            
-                import json
-                import os
-                import urllib.request
-                import base64
-            
-                host = os.environ["SONAR_HOST_URL"]
-                project = os.environ["SONAR_PROJECT_KEY"]
-                pr = os.environ["PR_NUMBER"]
-                token = os.environ["SONAR_TOKEN"]
-            
-                def call(path):
-                    url = f"{host}{path}"
-            
-                    req = urllib.request.Request(url)
-            
-                    auth = (token + ":").encode("utf-8")
-            
-                    req.add_header(
-                        "Authorization",
-                        "Basic " + base64.b64encode(auth).decode("utf-8")
-                    )
-            
-                    with urllib.request.urlopen(req, timeout=30) as resp:
-                        return json.loads(resp.read().decode("utf-8"))
-            
-                measures = call(
-                    "/api/measures/component?component=" + project
-                    + "&pullRequest=" + pr
-                    + "&metricKeys=alert_status,new_bugs,new_vulnerabilities,new_code_smells,new_security_hotspots,new_coverage,new_duplicated_lines_density"
-                )
-            
-                issues = call(
-                    "/api/issues/search?componentKeys=" + project
-                    + "&pullRequest=" + pr
-                    + "&types=BUG,VULNERABILITY,CODE_SMELL"
-                    + "&ps=5&s=SEVERITY"
-                )
-            
-                issue_counts = call(
-                    "/api/issues/search?componentKeys=" + project
-                    + "&pullRequest=" + pr
-                    + "&types=BUG,VULNERABILITY,CODE_SMELL"
-                    + "&facets=types&ps=1"
-                )
-            
-                metrics = {
-                    m["metric"]: m.get("value", "-")
-                    for m in measures.get("component", {}).get("measures", [])
-                }
-            
-                quality = metrics.get("alert_status", "UNKNOWN")
-                total = issues.get("total", 0)
-                top_issues = issues.get("issues", [])
-            
-                type_counts = {
-                    "BUG": "0",
-                    "VULNERABILITY": "0",
-                    "CODE_SMELL": "0"
-                }
-            
-                for facet in issue_counts.get("facets", []):
-                    if facet.get("property") == "types":
-                        for val in facet.get("values", []):
-                            if val["val"] in type_counts:
-                                type_counts[val["val"]] = str(val["count"])
-            
-                lines = []
-            
-                lines.append("<!-- sonar-pr-decoration -->")
-                lines.append("## SonarCloud PR Analysis")
-                lines.append("")
-                lines.append(f"- Quality Gate: **{quality}**")
-                lines.append(f"- New Bugs: **{type_counts['BUG']}**")
-                lines.append(f"- New Vulnerabilities: **{type_counts['VULNERABILITY']}**")
-                lines.append(f"- New Code Smells: **{type_counts['CODE_SMELL']}**")
-                lines.append(f"- New Security Hotspots: **{metrics.get('new_security_hotspots', '0')}**")
-                lines.append(f"- New Coverage: **{metrics.get('new_coverage', 'N/A')}%**")
-                lines.append(f"- New Duplication: **{metrics.get('new_duplicated_lines_density', 'N/A')}%**")
-                lines.append("")
-                lines.append(f"Total new issues: **{total}**")
-            
-                if top_issues:
-                    lines.append("")
-                    lines.append("### Top Sonar Issues")
-                    for item in top_issues:
-                        lines.append(
-                            f"- [{item['type']}/{item['severity']}] "
-                            f"{item['message']} (`{item['rule']}`)"
-                        )
-            
-                lines.append("")
-                lines.append(
-                    f"[Open SonarCloud Dashboard]"
-                    f"({host}/dashboard?id={project}&pullRequest={pr})"
-                )
-            
-                with open("sonar_pr_comment.md", "w", encoding="utf-8") as f:
-                    f.write("\n".join(lines))
-            
-                PY
-      
+        python - << 'PY'
+        import json
+        import os
+        import base64
+        import urllib.request
+
+        host = os.environ["SONAR_HOST_URL"]
+        project = os.environ["SONAR_PROJECT_KEY"]
+        pr = os.environ["PR_NUMBER"]
+        token = os.environ["SONAR_TOKEN"]
+
+        def call(path):
+            url = f"{host}{path}"
+            req = urllib.request.Request(url)
+            auth = (token + ":").encode("utf-8")
+            req.add_header("Authorization", "Basic " + base64.b64encode(auth).decode("utf-8"))
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+
+        def measure_value(m):
+            # New-code metrics (e.g. new_coverage) return their value under
+            # "period"/"periods", NOT "value" -- read whichever is present.
+            if m.get("value") is not None:
+                return m["value"]
+            p = m.get("period")
+            if isinstance(p, dict) and p.get("value") is not None:
+                return p["value"]
+            ps = m.get("periods")
+            if isinstance(ps, list) and ps and ps[0].get("value") is not None:
+                return ps[0]["value"]
+            return None
+
+        measures = call(
+            "/api/measures/component?component=" + project
+            + "&pullRequest=" + pr
+            + "&metricKeys=new_coverage"
+        )
+
+        metrics = {m["metric"]: measure_value(m) for m in measures.get("component", {}).get("measures", [])}
+        new_coverage = metrics.get("new_coverage")
+
+        lines = []
+        lines.append("<!-- sonar-pr-decoration -->")
+        lines.append("## SonarCloud PR Analysis")
+        lines.append("")
+        lines.append(f"- New Coverage: **{new_coverage + '%' if new_coverage is not None else 'N/A'}**")
+
+        with open("sonar_pr_comment.md", "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+        PY
+
+    - name: Publish SonarCloud PR decoration comment
+      if: always()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const marker = '<!-- sonar-pr-decoration -->';
+          const body = fs.readFileSync('sonar_pr_comment.md', 'utf8');
+
+          const { owner, repo } = context.repo;
+          const issue_number = context.issue.number;
+
+          const comments = await github.paginate(github.rest.issues.listComments, {
+            owner,
+            repo,
+            issue_number,
+            per_page: 100,
+          });
+
+          const existing = comments.find(c => c.user?.type === 'Bot' && c.body?.includes(marker));
+
+          if (existing) {
+            await github.rest.issues.updateComment({
+              owner,
+              repo,
+              comment_id: existing.id,
+              body,
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number,
+              body,
+            });
+          }
