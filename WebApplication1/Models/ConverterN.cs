@@ -27,9 +27,6 @@ namespace WebApplication1.Models
         {
             return celsius + 273.15;
         }
-       public double CelsiusToKelvin(long celsius)
-        {
-            return celsius + 273.15;
-        }
+
     }
 }
