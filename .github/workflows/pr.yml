@@ -5,9 +5,17 @@ name: PR Validation (Build, Test & SonarCloud Quality Gate)
 # check if the SonarCloud Quality Gate does not pass (sonar.qualitygate.wait).
 #adding comment 
 on:
+  push:
+    branches:
+      - '**'
+
   pull_request:
     branches:
       - main
+#on:
+#  pull_request:
+#    branches:
+#      - main
 
 # Needed so the PR-decoration step can post/update a comment on the PR.
 permissions:
