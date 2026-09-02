@@ -32,6 +32,31 @@ namespace WebApplication1.Models
             return Result;
         }
 
+                public double Add(double a, double b,double c)
+        {
+            Result = a + b;
+            Record("{0} + {1} = {2}", a, b, Result);
+            return Result;
+        }
+                public double Add(double a, double b,double c,double d)
+        {
+            Result = a + b;
+            Record("{0} + {1} = {2}", a, b, Result);
+            return Result;
+        }
+                public double Add(double a, double b,double c,double d,double e)
+        {
+            Result = a + b;
+            Record("{0} + {1} = {2}", a, b, Result);
+            return Result;
+        }
+                public double Add(double a, double b,double c,double d,double e,double f)
+        {
+            Result = a + b;
+            Record("{0} + {1} = {2}", a, b, Result);
+            return Result;
+        }
+
         /// <summary>
         /// Subtracts <paramref name="b"/> from <paramref name="a"/>.
         /// </summary>
