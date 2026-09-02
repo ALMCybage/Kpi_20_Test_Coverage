@@ -3,6 +3,8 @@ name: PR Validation (Build, Test & SonarCloud Quality Gate)
 # Runs on every pull request that targets main.
 # Builds, runs tests with coverage, sends results to SonarCloud, and fails the
 # check if the SonarCloud Quality Gate does not pass (sonar.qualitygate.wait).
+#addding comment
+
 on:
   pull_request:
     branches:
