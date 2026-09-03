@@ -89,7 +89,7 @@ jobs:
           /o:"almcybage" `
           /k:"almcybage_kpi-20-test-coverage" `
           /d:sonar.host.url="https://sonarcloud.io" `
-          /d:sonar.token="${{ secrets.SONAR_TOKEN }}" `
+          /d:sonar.token="6e1bb943a2b4735b188bfc40614dd773446a5af8" `
           /d:sonar.cs.vscoveragexml.reportsPaths="coverage.xml" `
           /d:sonar.qualitygate.wait=true `
           /d:sonar.exclusions="**/Scripts/**,**/Content/**,**/fonts/**,**/*.min.js,**/*.min.css,**/bin/**,**/obj/**" `
@@ -125,7 +125,7 @@ jobs:
     - name: SonarScanner End
       shell: powershell
       run: |
-        dotnet-sonarscanner end /d:sonar.token="${{ secrets.SONAR_TOKEN }}"
+        dotnet-sonarscanner end /d:sonar.token="6e1bb943a2b4735b188bfc40614dd773446a5af8"
 
 
     # ----------------------------------------------------------------------
@@ -140,7 +140,7 @@ jobs:
       if: always()
       shell: bash
       env:
-        SONAR_TOKEN: "${{ secrets.SONAR_TOKEN }}"
+        SONAR_TOKEN: "6e1bb943a2b4735b188bfc40614dd773446a5af8"
         SONAR_PROJECT_KEY: almcybage_kpi-20-test-coverage
         SONAR_HOST_URL: https://sonarcloud.io
         PR_NUMBER: ${{ github.event.pull_request.number }}
