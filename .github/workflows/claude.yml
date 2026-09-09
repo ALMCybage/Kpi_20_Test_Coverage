@@ -39,6 +39,3 @@ jobs:
 
           additional_permissions: |
             actions: read
-
-          claude_args: |
-            --model claude-4-0-sonnet-20250805
