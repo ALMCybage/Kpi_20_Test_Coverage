@@ -8,5 +8,10 @@ namespace WebApplication1.Models
         {
             return (celsius * 9 / 5) + 32;
         }
+
+                public double CelsiusToFahrenheit(int celsius)
+        {
+            return (celsius * 9 / 5) + 32;
+        }
     }
 }
