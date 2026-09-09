@@ -1,60 +1,33 @@
 name: Claude Code
-
 on:
   workflow_dispatch:
-
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned]
+  pull_request_review:
+    types: [submitted]
+ 
 permissions:
   contents: write
   id-token: write
   pull-requests: write
   issues: write
-
+ 
 jobs:
   claude:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Run Claude Code
-        id: claude
-        uses: anthropics/claude-code-action@v1
+ 
+      - uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-
-          show_full_output: true
-
-          prompt: |
-            Analyze the repository and implement the requested changes.
-            Create the changes on a new Claude branch.
-            Commit the changes to that branch.
-
+          anthropic_api_key: ${{ secrets.SURAJ_CLAUDE_TOKEN }}
           claude_args: |
             --model claude-sonnet-4-5
-            --allowedTools "Bash(git:*),Bash(gh:*),Edit,Write"
-
-      - name: Show Claude outputs
-        run: |
-          echo "Claude branch: ${{ steps.claude.outputs.branch_name }}"
-          echo "Claude conclusion: ${{ steps.claude.outputs.conclusion }}"
-
-      - name: Create Pull Request automatically
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BRANCH_NAME: ${{ steps.claude.outputs.branch_name }}
-        run: |
-          echo "Claude branch: $BRANCH_NAME"
-
-          if [ -z "$BRANCH_NAME" ]; then
-            echo "ERROR: Claude did not return a branch name."
-            exit 1
-          fi
-
-          gh pr create \
-            --base main \
-            --head "$BRANCH_NAME" \
-            --title "Claude: Automated changes" \
-            --body "This PR was automatically created from Claude's changes."
+          
