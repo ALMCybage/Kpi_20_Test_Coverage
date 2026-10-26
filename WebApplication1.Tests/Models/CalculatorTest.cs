@@ -4,7 +4,7 @@ using WebApplication1.Models;
 
 namespace WebApplication1.Tests.Models
 {
-    /// <summary>
+    /// <summary>c
     /// Partial test suite for <see cref="Calculator"/>.
     /// Intentionally covers only the basic operations (~40% of the class) so the
     /// coverage-delta KPI has a meaningful, non-100% baseline to measure against.
